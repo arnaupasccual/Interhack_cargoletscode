@@ -155,7 +155,7 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
     base = df[["Id. Cliente", "Familia_H", "fam_potential",
                 "ratio_vs_potential"]].drop_duplicates(
                     subset=["Id. Cliente", "Familia_H"])
-    label_lkp  = out_m0.set_index(["clinic_id", "familia"])["label_m0"].to_dict()
+    label_lkp  = out_m0.set_index(["Id. Cliente", "familia"])["label_m0"].to_dict()
     pot_lkp    = base.set_index(["Id. Cliente", "Familia_H"])["fam_potential"].to_dict()
     ratio_lkp  = base.set_index(["Id. Cliente", "Familia_H"])["ratio_vs_potential"].to_dict()
 

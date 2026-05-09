@@ -118,9 +118,9 @@ def run(df: pd.DataFrame, label_m0: pd.DataFrame = None) -> pd.DataFrame:
 
     if label_m0 is not None:
         df = df.merge(
-            label_m0[["clinic_id", "familia", "label_m0"]],
+            label_m0[["Id. Cliente", "familia", "label_m0"]],
             left_on=["Id. Cliente", "Familia_H"],
-            right_on=["clinic_id", "familia"],
+            right_on=["Id. Cliente", "familia"],
             how="left"
         )
     else:

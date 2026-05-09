@@ -174,7 +174,7 @@ def detect_transitions(df: pd.DataFrame) -> pd.DataFrame:
 def run(df: pd.DataFrame) -> pd.DataFrame:
     """
     Entrada:  DataFrame con columnas reales del CSV.
-    Salida:   DataFrame con clinic_id, familia, label_m0,
+    Salida:   DataFrame con Id. Cliente, familia, label_m0,
               cluster_id, en_transicion.
     """
     print("[M0] Iniciando clasificación de perfil de cliente...")
@@ -191,5 +191,5 @@ def run(df: pd.DataFrame) -> pd.DataFrame:
 
     return df[[COL_CLIENT, COL_FAMILIA,
                "label_m0", "cluster_id", "en_transicion"
-               ]].rename(columns={COL_CLIENT: "clinic_id",
+               ]].rename(columns={COL_CLIENT: "Id. Cliente",
                                    COL_FAMILIA: "familia"})
