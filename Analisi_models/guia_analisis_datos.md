@@ -59,7 +59,7 @@ Se calculan por cliente × familia de producto, con actualización diaria. El vo
 
 Se ejecutan con actualización diaria, salvo M0 que recalcula el label de perfil semanalmente. La salida de cada modelo es siempre a nivel cliente × familia.
 
-**M0 — Perfil de cliente (Leal / Promiscuo / Esporádico / Marginal)**
+**M0 — Perfil de cliente (Leal / Promiscuo / Esporádico)**
 Clasifica a cada cliente según su patrón estructural de compra en cada familia. Es el modelo transversal: su output condiciona qué alertas se activan y con qué canal. La misma señal de M2 genera una alerta de captura competidora si el cliente es Promiscuo, o una alerta de fuga preocupante si es Leal. Algoritmo: clustering (K-Means o jerárquico) sobre `ratio_vs_potential`, `inter_order_std` y `silence_streak`, seguido de reglas de negocio para etiquetar los clústeres de forma interpretable.
 
 **M1 — Predicción de reposición**
