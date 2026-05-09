@@ -11,6 +11,7 @@ Columnas reales usadas:
   label_m0 (de M0)
 """
 
+import unicodedata
 import pandas as pd
 import numpy as np
 import warnings
@@ -25,15 +26,16 @@ SILENCIO_FUGA_MULTIPLIER  = 2.0
 VENTANA_CAPTURA_MIN       = 1.0
 VENTANA_CAPTURA_MAX       = 2.2
 
-COMMODITY_BLOQUES = {"anestesia", "agujas", "desinfeccion", "consumible",
-                     "higiene", "material fungible"}
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _ascii(s: str) -> str:
+    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower().strip()
+
 
 def es_commodity(bloque) -> bool:
     if pd.isna(bloque):
         return True
-    return any(c in str(bloque).lower().strip() for c in COMMODITY_BLOQUES)
+    return "commodit" in _ascii(str(bloque))
 
 
 def cusum_score(row: pd.Series) -> float:
@@ -50,8 +52,11 @@ def cusum_score(row: pd.Series) -> float:
 
 def zscore_agudo(row: pd.Series) -> float:
     """Z-score de caída aguda usando trend_slope_30d vs. variabilidad histórica."""
+    slope = row["trend_slope_30d"]
+    if pd.isna(slope):
+        return 0.0
     std_proxy = max(row["inter_order_std"] / max(row["inter_order_avg"], 1), 0.01)
-    return round(float(row["trend_slope_30d"] / std_proxy), 4)
+    return round(float(slope / std_proxy), 4)
 
 
 def classify_alert(row: pd.Series) -> dict:

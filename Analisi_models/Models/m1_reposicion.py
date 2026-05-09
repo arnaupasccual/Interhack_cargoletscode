@@ -9,6 +9,7 @@ Columnas reales usadas:
   Familia_H, Id. Cliente, label_m0 (de M0)
 """
 
+import unicodedata
 import pandas as pd
 import numpy as np
 import warnings
@@ -25,21 +26,26 @@ except ImportError:
 VENTANA_ALERTA_DIAS = 4
 PROB_UMBRAL_A1      = 0.60
 
-COMMODITY_BLOQUES = {"anestesia", "agujas", "desinfeccion", "consumible",
-                     "higiene", "material fungible"}
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _ascii(s: str) -> str:
+    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower().strip()
+
 
 def es_commodity(bloque) -> bool:
     if pd.isna(bloque):
         return True
-    b = str(bloque).lower().strip()
-    return any(c in b for c in COMMODITY_BLOQUES)
+    return "commodit" in _ascii(str(bloque))
 
 
 def estimate_days_to_reorder(row: pd.Series) -> float:
-    base  = row["inter_order_avg"] / max(row["seasonal_index"], 0.5)
+    si = row["seasonal_index"]
+    if pd.isna(si) or si <= 0:
+        si = 1.0
+    base  = row["inter_order_avg"] / max(si, 0.5)
     slope = row.get("trend_slope_90d", 0.0)
+    if pd.isna(slope):
+        slope = 0.0
     if slope > 0.02:
         base *= 0.90
     elif slope < -0.03:
@@ -50,8 +56,13 @@ def estimate_days_to_reorder(row: pd.Series) -> float:
 def prob_pedido_nd(row: pd.Series, n: int = 7) -> float:
     from scipy.stats import norm
     mu  = row["inter_order_avg"]
-    std = max(row["inter_order_std"], 1.0)
+    std = row["inter_order_std"]
+    if pd.isna(std) or std <= 0:
+        std = max(mu * 0.3, 1.0)
+    std = max(std, 1.0)
     t0  = row["days_since_last_order"]
+    if pd.isna(t0):
+        return 0.0
     p   = norm.cdf(t0 + n, loc=mu, scale=std) - norm.cdf(t0, loc=mu, scale=std)
     return round(float(np.clip(p, 0, 1)), 4)
 

@@ -12,6 +12,7 @@ Columnas reales usadas:
   label_m0 (de M0)
 """
 
+import unicodedata
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
@@ -34,17 +35,22 @@ IF_N_ESTIMATORS   = 100
 IF_RANDOM_STATE   = 42
 ANOMALY_THRESHOLD = -0.05
 
-TECNICO_BLOQUES = {"implantes", "ortodoncia", "protesica", "tecnico",
-                   "cirugia", "endodoncia", "periodoncia"}
+TECNICO_KEYS = {"tecnico", "tecnicos", "implante", "ortodoncia",
+                "protetica", "cirugia", "endodoncia", "periodoncia"}
 
 SILENCIO_INACTIVO_MULT = 3.0
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _ascii(s: str) -> str:
+    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode().lower().strip()
+
+
 def es_tecnico(bloque) -> bool:
     if pd.isna(bloque):
         return False
-    return any(t in str(bloque).lower().strip() for t in TECNICO_BLOQUES)
+    b = _ascii(str(bloque))
+    return any(k in b for k in TECNICO_KEYS)
 
 
 def fit_isolation_forest(df_fam: pd.DataFrame):
@@ -61,9 +67,16 @@ def fit_isolation_forest(df_fam: pd.DataFrame):
     return iforest, scaler
 
 
-def score_anomaly(df_fam, iforest, scaler) -> np.ndarray:
+def score_anomaly(df_fam, iforest, scaler):
+    """Returns (decision_scores, is_anomaly_flags).
+    decision_function() is calibrated so that < 0 means anomalous
+    according to the contamination parameter — no hardcoded threshold needed.
+    """
     X = df_fam[FEATURES_M3].fillna(df_fam[FEATURES_M3].median())
-    return iforest.score_samples(scaler.transform(X))
+    X_sc = scaler.transform(X)
+    decision_scores = iforest.decision_function(X_sc)
+    is_anomaly = iforest.predict(X_sc) == -1
+    return decision_scores, is_anomaly
 
 
 def classify_anomaly_type(row: pd.Series) -> str:
@@ -130,22 +143,24 @@ def run(df: pd.DataFrame, label_m0: pd.DataFrame = None) -> pd.DataFrame:
                                      "motivo_a4", "motivo_a5"])
 
     df_t["anomaly_score"] = np.nan
+    df_t["_is_anomaly"] = False
 
     for fam, grp in df_t.groupby("Familia_H"):
         if len(grp) < 10:
             df_t.loc[grp.index, "anomaly_score"] = 0.0
+            df_t.loc[grp.index, "_is_anomaly"] = False
             continue
         iforest, scaler = fit_isolation_forest(grp)
-        scores = score_anomaly(grp, iforest, scaler)
+        scores, is_anom = score_anomaly(grp, iforest, scaler)
         df_t.loc[grp.index, "anomaly_score"] = scores
-        n_anom = (scores < ANOMALY_THRESHOLD).sum()
-        print(f"    '{fam}': {len(grp)} clientes, anómalos: {n_anom}")
+        df_t.loc[grp.index, "_is_anomaly"] = is_anom
+        print(f"    '{fam}': {len(grp)} clientes, anomalos: {is_anom.sum()}")
 
     df_t["anomaly_type"] = df_t.apply(classify_anomaly_type, axis=1)
 
     # A4: anómalo con historial real (no marginal)
     df_t["activa_a4"] = (
-        (df_t["anomaly_score"] < ANOMALY_THRESHOLD) &
+        df_t["_is_anomaly"] &
         (df_t["label_m0"] != "marginal")
     )
 

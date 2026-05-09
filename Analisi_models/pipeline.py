@@ -34,6 +34,9 @@ CANAL_MAP = {
     "A4": "Delegado",
     "A5": "Marketing_Auto",
     "A6": "Delegado_Urgente",
+    "A7": "Televendedor",
+    "A8": "Delegado",
+    "A9": "Delegado",
 }
 
 URGENCIA_MAP = {
@@ -43,6 +46,9 @@ URGENCIA_MAP = {
     "A4": 1.5,
     "A5": 0.7,
     "A6": 2.0,
+    "A7": 0.9,
+    "A8": 1.3,
+    "A9": 1.4,
 }
 
 # ── Columnas obligatorias ─────────────────────────────────────────────────────
@@ -77,10 +83,11 @@ def load_features(path: str) -> pd.DataFrame:
     df = pd.read_csv(path, usecols=cols_to_read, low_memory=False)
     print(f"  Filas: {len(df):,} | Columnas leídas: {len(df.columns)}")
 
-    # Validaciones básicas
-    if df["ratio_vs_potential"].max() > 1.5:
-        print("  AVISO: ratio_vs_potential parece estar en %, dividiéndolo entre 100")
-        df["ratio_vs_potential"] = df["ratio_vs_potential"] / 100.0
+    # Validaciones básicas — clip outliers extremos (>2 = compra 200% del potencial estimado)
+    if df["ratio_vs_potential"].max() > 2.0:
+        n_outliers = (df["ratio_vs_potential"] > 2.0).sum()
+        print(f"  AVISO: {n_outliers} filas con ratio_vs_potential > 2.0, recortando a 2.0")
+        df["ratio_vs_potential"] = df["ratio_vs_potential"].clip(upper=2.0)
 
     if "Valores_H" in df.columns:
         df["fam_potential"] = df["Valores_H"].clip(lower=0)
@@ -97,7 +104,19 @@ def load_features(path: str) -> pd.DataFrame:
     # inter_order_avg nunca puede ser 0
     df = df[df["inter_order_avg"] > 0].copy()
 
-    print(f"  Filas válidas para modelado: {len(df):,}")
+    # Deduplicate: one current-state snapshot per (client × familia).
+    # The features CSV has one row per original transaction with aggregated
+    # features broadcast across rows. Models need exactly one row per pair.
+    # Sort by Fecha so we keep the most-recent transaction's flags.
+    if "Fecha" in df.columns:
+        df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+        df = df.sort_values("Fecha")
+    antes_dedup = len(df)
+    df = df.drop_duplicates(subset=["Id. Cliente", "Familia_H"], keep="last").copy()
+    print(f"  Pares unicos (cliente x familia): {len(df):,}  "
+          f"(eliminadas {antes_dedup - len(df):,} filas duplicadas)")
+
+    print(f"  Filas validas para modelado: {len(df):,}")
     return df
 
 
@@ -216,10 +235,11 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
 # ── Resumen ejecutivo ─────────────────────────────────────────────────────────
 
 def print_summary(df_alerts, out_m0):
-    print("\n" + "═" * 55)
-    print("  RESUMEN — Smart Demand Signals")
-    print("═" * 55)
-    print("\n📊 Perfiles M0:")
+    sep = "=" * 55
+    print("\n" + sep)
+    print("  RESUMEN -- Smart Demand Signals")
+    print(sep)
+    print("\nPerfiles M0:")
     for label, cnt in out_m0["label_m0"].value_counts().items():
         print(f"   {label:<25} {cnt:>6}")
 
@@ -227,18 +247,18 @@ def print_summary(df_alerts, out_m0):
         print("\n  Sin alertas generadas.")
         return
 
-    print(f"\n🔔 Alertas generadas: {len(df_alerts)}")
+    print(f"\nAlertas generadas: {len(df_alerts)}")
     for tipo, grp in df_alerts.groupby("tipo_alerta"):
-        print(f"   {tipo}  {len(grp):>5} alertas  → {grp['canal'].iloc[0]}")
+        print(f"   {tipo}  {len(grp):>5} alertas  -> {grp['canal'].iloc[0]}")
 
-    print(f"\n💰 Impacto estimado total: "
-          f"{df_alerts['impacto_estimado'].sum():,.0f} €")
+    print(f"\nImpacto estimado total: "
+          f"{df_alerts['impacto_estimado'].sum():,.0f} EUR")
 
-    print(f"\n🏆 Top 5 por prioridad:")
+    print(f"\nTop 5 por prioridad:")
     cols = ["rank", "client_id", "familia", "tipo_alerta",
             "canal", "impacto_estimado", "score_prioridad"]
     print(df_alerts[cols].head(5).to_string(index=False))
-    print("\n" + "═" * 55)
+    print("\n" + sep)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -256,11 +276,11 @@ def main(input_path: str, output_path: str):
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df_alerts.to_csv(output_path, index=False)
-    print(f"[Pipeline] Alertas → {output_path}")
+    print(f"[Pipeline] Alertas -> {output_path}")
 
     m0_path = output_path.replace("alertas", "perfiles_m0")
     out_m0.to_csv(m0_path, index=False)
-    print(f"[Pipeline] Perfiles M0 → {m0_path}")
+    print(f"[Pipeline] Perfiles M0 -> {m0_path}")
 
     print_summary(df_alerts, out_m0)
     return df_alerts, out_m0
