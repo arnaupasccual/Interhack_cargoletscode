@@ -71,12 +71,6 @@ Detecta desviaciones sostenidas entre el consumo observado y el consumo esperado
 **M3 — Fuga en producto técnico**
 Detecta anomalías en el patrón histórico individual de cada cliente, sin necesidad de benchmark grupal. Adecuado para productos técnicos con alta heterogeneidad entre clientes. Alimenta A4 (fuga técnico) y A5 (cliente recuperable tras silencio largo). Algoritmo: Isolation Forest entrenado por cliente sobre `silence_streak`, `trend_slope_30d` y `pct_families_active`.
 
-**M4 — Riesgo de devolución** *(nuevo)*
-Predice la probabilidad de que el próximo pedido de un cliente en una familia acabe siendo devuelto o cancelado, antes de que ocurra. Detecta fricción oculta que precede a la fuga y que M2 y M3 no ven todavía en el volumen. Alimenta A8 (fricción oculta). Features principales: `ratio_devoluciones`, `cancelacion_streak`, `primera_devolucion`, familia de producto, label M0. Algoritmo: regresión logística si los datos de motivo son limpios; XGBoost si hay muchas variables categóricas.
-
-**M5 — Señal previa a fuga** *(nuevo)*
-Combina múltiples señales débiles que individualmente no superan ningún umbral pero que en conjunto indican pre-fuga. Actúa entre dos y seis semanas antes que M2 o M3. Alimenta A9 (pre-fuga temprana). Funciona como score ponderado por reglas: cancelación reciente en cliente limpio (+2), primera devolución en menos de seis meses (+3), slope negativo en 30 días sin llegar al umbral de M2 (+1), silencio más largo de lo habitual (+1), reducción de familias activas (+2). El umbral de activación se calibra con el feedback loop para reducir falsos positivos progresivamente.
-
 ---
 
 ## Capa 5 — Motor de alertas y priorización
@@ -84,6 +78,122 @@ Combina múltiples señales débiles que individualmente no superan ningún umbr
 Recibe las salidas de todos los modelos y genera alertas a nivel cliente × familia × momento. Cada alerta incluye obligatoriamente: motivo en lenguaje natural, familia afectada, canal recomendado, impacto económico esperado (`ratio_vs_potential × potencial_cliente × ticket_medio_familia`) y urgencia temporal (días hasta que la ventana se cierra o días de silencio acumulado). La priorización se calcula como `score = impacto_económico × (1 / días_restantes)`. El label de M0 determina el canal: delegado para clientes de alto valor o señales urgentes, televendedor para reposición y nuevos clientes, marketing automation para recuperación de inactivos.
 
 El catálogo completo de alertas es: A1 reponer pronto, A2 ventana de captura en promiscuo, A3 fuga en leal (commodity), A4 fuga en técnico, A5 cliente recuperable, A6 anomalía de volumen brusca, A7 cliente nuevo sin segunda compra, A8 fricción oculta por devoluciones, A9 pre-fuga temprana multimodal.
+
+## Catálogo de alertas — detalle completo
+
+Cada alerta se describe con su lógica de activación, condiciones exactas, output que produce, canal recomendado y cómo se desactiva.
+
+---
+
+### A1 — Reponer pronto
+
+**Qué detecta:** un cliente Leal está próximo a agotar su stock estimado de una familia commodity y se acerca su ventana habitual de pedido.
+
+**Condiciones de activación:**
+- Label M0 = Leal
+- M1 estima que el próximo pedido esperado se producirá en los próximos N días (umbral configurable, típicamente 3–7 días según la familia)
+- `days_since_last_order` ≥ 70% del `inter_order_avg` histórico del cliente
+- No hay pedido ya en curso para esa familia
+
+**Output de la alerta:**
+- Cliente, familia, fecha estimada de necesidad
+- Volumen habitual del cliente en esa familia (referencia para el televendedor)
+- Días restantes estimados hasta agotamiento
+- Motivo: "Este cliente pide anestesia cada 14 días de media. Su último pedido fue hace 11 días."
+
+**Canal:** Televendedor. Es una alerta de baja urgencia y alta previsibilidad; no requiere delegado.
+
+**Desactivación:** se cierra automáticamente cuando entra un pedido de esa familia, o si pasan más de 5 días desde la fecha estimada sin pedido (en ese caso puede escalar a A3 o A6).
+
+---
+
+### A2 — Ventana de captura en promiscuo
+
+**Qué detecta:** un cliente Promiscuo ha entrado en una ventana temporal en la que, según su patrón histórico, debería estar comprando pero no lo está haciendo con Inibsa. Es el momento óptimo para intentar capturar demanda que habitualmente va a la competencia.
+
+**Condiciones de activación:**
+- Label M0 = Promiscuo
+- M2 detecta que `ratio_vs_potential` está por debajo de la media histórica del cliente en esa familia
+- `days_since_last_order` supera el `inter_order_avg` del cliente pero sin llegar al umbral de fuga
+- El cliente tiene historial de compra en esa familia (no es primera vez)
+
+**Output de la alerta:**
+- Cliente, familia, días desde último pedido, ratio actual vs. potencial
+- Estimación del volumen que podría capturarse (potencial no materializado en los últimos 90 días)
+- Motivo: "Este cliente compra anestesia aproximadamente cada 10 días. Lleva 13 días sin pedir. Su ratio de captura habitual es del 40% del potencial estimado."
+
+**Canal:** Delegado. Requiere conversación comercial, no solo llamada de pedido.
+
+**Desactivación:** entra un pedido (captura conseguida), o el silencio supera el umbral de fuga y la alerta escala a A3.
+
+---
+
+### A3 — Fuga en cliente leal (commodity)
+
+**Qué detecta:** un cliente históricamente Leal muestra una desviación sostenida y estadísticamente significativa respecto a su consumo esperado en una familia commodity. No es variación puntual: es un cambio de patrón.
+
+**Condiciones de activación:**
+- Label M0 = Leal
+- M2 CUSUM acumula desviación negativa sostenida durante 3 o más semanas consecutivas
+- Z-score de `ratio_vs_potential` en los últimos 30 días por debajo de −1.5 desviaciones
+- No hay ningún evento conocido que lo explique (promo, ruptura de stock, pedido extraordinario previo)
+
+**Output de la alerta:**
+- Cliente, familia, semanas de deterioro acumulado, magnitud de la desviación
+- Comparación entre volumen esperado y volumen observado en los últimos 60 días
+- Motivo: "Este cliente compraba una media de 8 cajas de anestesia al mes. En los últimos dos meses ha comprado 3. La desviación es sostenida y no coincide con ningún evento conocido."
+
+**Canal:** Delegado. Urgencia media-alta. El delegado debe visitar o llamar para entender qué está pasando antes de que la fuga se consolide.
+
+**Desactivación:** el volumen vuelve al rango esperado durante dos semanas consecutivas, o se registra un motivo conocido que explica la caída (cierre temporal de clínica, baja del profesional, etc.).
+
+---
+
+### A4 — Fuga en producto técnico
+
+**Qué detecta:** un cliente comprador de un producto técnico muestra un patrón anómalo respecto a su propio historial individual: caída de frecuencia, caída de volumen, desaparición de compra o combinación de varias. La referencia no es un benchmark grupal sino el comportamiento previo del propio cliente.
+
+**Condiciones de activación:**
+- Cliente con historial de compra activo en esa familia técnica (al menos 3 pedidos en los últimos 12 meses)
+- M3 (Isolation Forest) clasifica el patrón actual como anómalo respecto al histórico individual
+- Al menos una de: `silence_streak` supera 2 veces la mediana del cliente, `trend_slope_30d` negativo y acelerado, `pct_families_active` ha caído respecto a los 90 días anteriores
+
+**Output de la alerta:**
+- Cliente, familia técnica, tipo de anomalía detectada (silencio, caída de volumen, reducción de familias)
+- Historial resumido: frecuencia habitual, último pedido, desviación actual
+- Motivo: "Este cliente pedía implantes cada 6 semanas. Lleva 14 semanas sin pedir. Su patrón histórico no contempla silencios de esta duración."
+
+**Canal:** Delegado. Alta prioridad, especialmente si el producto técnico tiene alto ticket. Requiere visita o llamada de diagnóstico, no solo de pedido.
+
+**Desactivación:** entra un pedido en esa familia, o el delegado registra un motivo válido (cambio de especialidad, cierre de clínica, caso clínico resuelto).
+
+---
+
+### A5 — Cliente recuperable
+
+**Qué detecta:** un cliente que llevaba un silencio prolongado (clasificado como inactivo) emite una señal débil de reactivación: un pedido pequeño, una consulta, una búsqueda en catálogo si el dato está disponible. Es el momento óptimo para reincidir antes de que el cliente se consolide como perdido.
+
+**Condiciones de activación:**
+- Cliente con silencio previo superior a 3 veces su `inter_order_avg` histórico (inactivo de facto)
+- M3 detecta una señal de reactivación: pedido de volumen inferior al 30% de su ticket habitual, o primer contacto tras el silencio
+- El cliente tiene historial previo relevante (no es cliente marginal)
+
+**Output de la alerta:**
+- Cliente, familia, duración del silencio previo, señal de reactivación detectada
+- Valor histórico del cliente (volumen anual en su mejor período)
+- Motivo: "Este cliente estuvo 8 meses sin pedir. Ha realizado un pedido pequeño de material de desinfección. Históricamente compraba por valor de X€ anuales."
+
+**Canal:** Marketing automation en primera instancia (email o mensaje personalizado). Si no hay respuesta en 7 días, escala a Televendedor.
+
+**Desactivación:** el cliente recupera un patrón de compra mínimamente activo (al menos 2 pedidos en 60 días), o no responde tras los intentos de contacto y se reclasifica como perdido.
+
+---
+
+**Output de la alerta:**
+- Cliente, familia o familias afectadas, score total, desglose de señales que contribuyeron
+- Horizonte temporal estimado: "Si el patrón continúa, riesgo de fuga confirmada en 3–6 semanas"
+- Motivo detallado: "Score 6/10. Contribuye: primera devolución hace 12 días (+3), tendencia negativa en 30 días sin llegar a umbral (+1), silencio actual 20% más largo que su media (+1), ha dejado de pedir en una familia que compraba habitualmente (+2)."
+
 
 ---
 
