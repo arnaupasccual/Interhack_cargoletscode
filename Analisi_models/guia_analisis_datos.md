@@ -1,113 +1,94 @@
-Buenas preguntas. Vamos a hacer un análisis completo y estructurado. Te presento primero el mapa completo de alertas (incluyendo las que faltan), y luego el pipeline de datos y modelos.
-
-## Alertas identificadas vs. las que faltan
-
-Las tres alertas que propones son sólidas, pero el briefing pide más. Aquí el cuadro completo:
-
-**Las que ya tienes:**
-1. "Le toca pedir pronto" (commodity) — predicción de reposición
-2. "Está dejando de comprar commodity" — deterioro en cliente leal
-3. "Está dejando de comprar producto técnico" — riesgo de abandono
-
-**Las que faltan y el briefing exige explícitamente:**
-4. **Ventana de captura competidora** — cliente promiscuo detectado en momento donde su compra habitual a la competencia debería haberse producido y no ha vuelto aún
-5. **Cliente recuperable** — llevaba meses sin comprar, empieza a dar señales (pedido pequeño, consulta) → momento óptimo para reincidir
-6. **Anomalía de volumen** — cliente leal compra de repente muchísimo menos (o muchísimo más) de lo esperado → puede ser señal de fuga parcial, cambio de clínica, o promoción de competidor
-7. **Cliente nuevo sin consolidar** — ha comprado 1-2 veces pero no ha repetido en el tiempo esperado → riesgo de no conversión temprana
+Aquí el resumen actualizado de todas las capas, sin diagrama:
 
 ---
 
-Ahora el diagrama de la arquitectura completa:---
+## Capa 1 — Datos brutos
 
-## Capa 2 — Limpieza y normalización (detalle)
-
-**Anomalías a tratar antes de cualquier modelo:**
-
-- **Pedidos extraordinarios** (stockaje por promo, fin de año): detectar outliers estadísticos por cliente × familia (IQR o z-score), marcarlos como "evento especial" y excluirlos del cálculo de recurrencia media. No eliminarlos del histórico, solo etiquetarlos.
-- **Rupturas de stock**: si múltiples clientes dejan de comprar una familia simultáneamente, es señal de ruptura, no de fuga. Se detecta por correlación temporal entre clientes de la misma zona o familia.
-- **Promociones**: crear una columna `is_promo_period` basada en el calendario comercial. Los modelos de tendencia deben excluir esos períodos o tratarlos como covariable.
-- **Sustituciones de producto**: mapear referencias discontinuadas a su familia normalizada. La unidad de análisis es siempre la familia, no el SKU.
-- **Clientes con histórico incompleto**: clientes con menos de 6 meses de datos se tratan aparte, con modelos más conservadores basados en medias de segmento similar (perfil de clínica, tamaño, especialidad).
-
-**Normalización:**
-
-- Convertir volumen a una métrica comparable entre clínicas: `ratio_compra = compra_observada / potencial_estimado`. El potencial viene del dato de cliente (tamaño, especialidad).
-- Crear una curva de consumo esperado *por tipología de clínica* (clúster de tamaño, especialidad, zona). Esto es el benchmark contra el que se mide cada cliente.
+Histórico de más de cinco años a nivel de cliente × producto × día. Incluye pedidos confirmados, cancelaciones y devoluciones como entidades propias (no como ajuste negativo del volumen). Cada registro de cancelación y devolución mantiene su fecha, familia de producto, volumen y motivo si está disponible. Esta separación es fundamental: tratarlos como meros descuentos sobre el pedido haría invisible la señal de fricción que contienen.
 
 ---
 
-## Capa 3 — Features clave por modelo
+## Capa 2 — Limpieza y normalización
 
-| Feature | Cómo se calcula | Usado en |
+El objetivo no es eliminar registros sino clasificarlos: separar lo que es ruido (distorsiona los modelos) de lo que es señal (debe convertirse en feature).
+
+**Pedidos:**
+- Pedidos extraordinarios por stockaje o fin de año se detectan como outliers estadísticos por cliente × familia (IQR o z-score) y se etiquetan como `evento_especial`. Se excluyen del cálculo de recurrencia media pero no se borran del histórico.
+- Rupturas de stock de Inibsa se identifican por correlación temporal entre múltiples clientes de la misma zona o familia en la misma ventana. No son señal de fuga.
+- Períodos promocionales se marcan con una columna `is_promo_period` basada en el calendario comercial. Los modelos de tendencia los excluyen o los tratan como covariable.
+- Sustituciones de producto se resuelven mapeando referencias discontinuadas a su familia normalizada. La unidad de análisis es siempre la familia, nunca el SKU.
+
+**Cancelaciones:**
+- Cancelación el mismo día con mismo volumen que un pedido duplicado → ruido administrativo, descartar.
+- Cancelación por ruptura de stock del lado de Inibsa → ruido externo, descartar.
+- Cancelación recurrente en un cliente con historial limpio → señal. Se convierte en feature `cancelacion_streak` y se alimenta a M4 y M5.
+
+**Devoluciones:**
+- Devolución por defecto de producto (motivo explícito o patrón puntual aislado) → ruido, descartar del cálculo de volumen activo.
+- Devolución recurrente de una misma familia → señal de fricción o de entrada de competidor con mejor producto. Se calcula el ratio `devoluciones / pedidos` en ventana de 90 días por cliente × familia.
+- Primera devolución en un cliente sin historial previo de devoluciones → flag binario `primera_devolucion`, señal de alerta temprana para M5.
+
+**Clientes con histórico incompleto:**
+- Menos de seis meses de datos: se tratan con modelos más conservadores basados en medias de segmento similar (perfil de clínica, tamaño, especialidad). No se mezclan con clientes con histórico largo.
+
+---
+
+## Capa 3 — Feature engineering
+
+Se calculan por cliente × familia de producto, con actualización diaria. El volumen bruto nunca entra directamente en los modelos; todo se expresa en métricas comparables entre clínicas de distinto tamaño y especialidad.
+
+| Feature | Cómo se calcula | Modelos que la usan |
 |---|---|---|
 | `days_since_last_order` | Fecha hoy − última fecha de pedido | M1, M2, M3 |
-| `inter_order_avg` | Media de días entre pedidos (últimos 12m) | M0, M1 |
+| `inter_order_avg` | Media de días entre pedidos (últimos 12 meses) | M0, M1 |
 | `inter_order_std` | Desviación estándar de esos intervalos | M0 (clientes esporádicos) |
-| `ratio_vs_potential` | Volumen comprado / potencial estimado | M0, M2 |
+| `ratio_vs_potential` | Volumen comprado / potencial estimado del cliente | M0, M2 |
 | `trend_slope_90d` | Regresión lineal del volumen en 90 días | M2, M3 |
-| `trend_slope_30d` | Ídem para ventana corta | M3 (señal temprana) |
+| `trend_slope_30d` | Ídem para ventana corta | M3, M5 (señal temprana) |
 | `seasonal_index` | Ratio mes actual vs. media histórica del mismo mes | M1, M2 |
-| `pct_families_active` | % de familias que sigue comprando | M3 (abandono gradual) |
-| `silence_streak` | Días consecutivos sin pedido en esa familia | M2, M3 |
+| `pct_families_active` | % de familias que el cliente sigue comprando | M3, M5 |
+| `silence_streak` | Días consecutivos sin pedido en esa familia | M2, M3, M5 |
 | `reactivation_signal` | Pedido pequeño tras silencio largo | A5 |
+| `ratio_devoluciones` | Devoluciones / pedidos en los últimos 90 días | M4, M5 |
+| `cancelacion_streak` | Cancelaciones consecutivas recientes | M4, M5 |
+| `primera_devolucion` | Flag binario: primera devolución en cliente limpio | M5 |
 
 ---
 
-## Capa 4 — Modelos en detalle
+## Capa 4 — Modelos
 
-### M0 — Clasificación Leal / Promiscuo / Esporádico
+Se ejecutan con actualización diaria, salvo M0 que recalcula el label de perfil semanalmente. La salida de cada modelo es siempre a nivel cliente × familia.
 
-Este modelo es el más importante porque su output condiciona qué alertas se activan para cada cliente. Se ejecuta una vez a la semana (no necesita recalcularse a diario).
+**M0 — Perfil de cliente (Leal / Promiscuo / Esporádico / Marginal)**
+Clasifica a cada cliente según su patrón estructural de compra en cada familia. Es el modelo transversal: su output condiciona qué alertas se activan y con qué canal. La misma señal de M2 genera una alerta de captura competidora si el cliente es Promiscuo, o una alerta de fuga preocupante si es Leal. Algoritmo: clustering (K-Means o jerárquico) sobre `ratio_vs_potential`, `inter_order_std` y `silence_streak`, seguido de reglas de negocio para etiquetar los clústeres de forma interpretable.
 
-**Algoritmo recomendado**: clustering jerárquico o K-Means sobre `ratio_vs_potential` + `inter_order_std` + `silence_streak`, seguido de reglas de negocio para etiquetar los clústeres.
+**M1 — Predicción de reposición**
+Estima los días hasta el próximo pedido esperado de cada cliente en cada familia. Alimenta la alerta A1 (reponer pronto) en clientes Leales, y la alerta A7 (cliente nuevo sin segunda compra) cuando no aparece señal de reposición en el plazo esperado. Algoritmo: survival analysis (Kaplan-Meier por segmento o modelo de Cox con covariables). Alternativa más explicable: regresión sobre `inter_order_avg` ajustada por `seasonal_index`.
 
-La lógica conceptual:
-- `ratio_vs_potential > 0.8` y `inter_order_std` baja → **Leal**
-- `ratio_vs_potential` entre 0.3–0.7 y compra irregular → **Promiscuo**
-- `inter_order_std` muy alta, compra esporádica → **Esporádico** (válido para productos técnicos)
-- `ratio_vs_potential < 0.1`, sin patrón → **Marginal / sin clasificar**
+**M2 — Fuga en commodity**
+Detecta desviaciones sostenidas entre el consumo observado y el consumo esperado según el potencial del cliente. Distingue variación puntual (ruido) de deterioro acumulado (señal). Alimenta A2 (ventana de captura en promiscuos), A3 (fuga en leales) y A6 (caída brusca de volumen). Algoritmo: CUSUM sobre la serie temporal de `ratio_vs_potential`. Complemento: z-score en ventana de 30 días como detector de caídas agudas.
 
-El label de M0 se añade como feature a todos los demás modelos y como filtro del motor de alertas (por ejemplo, la alerta A2 solo se activa en clientes etiquetados como Promiscuos).
+**M3 — Fuga en producto técnico**
+Detecta anomalías en el patrón histórico individual de cada cliente, sin necesidad de benchmark grupal. Adecuado para productos técnicos con alta heterogeneidad entre clientes. Alimenta A4 (fuga técnico) y A5 (cliente recuperable tras silencio largo). Algoritmo: Isolation Forest entrenado por cliente sobre `silence_streak`, `trend_slope_30d` y `pct_families_active`.
 
-### M1 — Predicción de reposición (A1)
+**M4 — Riesgo de devolución** *(nuevo)*
+Predice la probabilidad de que el próximo pedido de un cliente en una familia acabe siendo devuelto o cancelado, antes de que ocurra. Detecta fricción oculta que precede a la fuga y que M2 y M3 no ven todavía en el volumen. Alimenta A8 (fricción oculta). Features principales: `ratio_devoluciones`, `cancelacion_streak`, `primera_devolucion`, familia de producto, label M0. Algoritmo: regresión logística si los datos de motivo son limpios; XGBoost si hay muchas variables categóricas.
 
-**Algoritmo**: Survival analysis (Kaplan-Meier por segmento, o modelo de Cox con covariables). Alternativa más simple y explicable: regresión lineal sobre `inter_order_avg` ajustada por `seasonal_index`.
-
-Output: **probabilidad de que el cliente pida en los próximos N días**. La alerta A1 se activa cuando esa probabilidad supera umbral y `days_since_last_order` está dentro de la ventana esperada.
-
-### M2 — Fuga en commodity (A3, A2)
-
-**Algoritmo**: CUSUM (cumulative sum control chart) sobre la serie temporal de `ratio_vs_potential`. El CUSUM es ideal porque detecta cambios sostenidos de forma acumulativa, evitando disparar alertas por variación puntual.
-
-Un z-score sobre la ventana de 30 días es la alternativa más simple. Si el z-score está por debajo de −1.5 desviaciones durante 3+ semanas consecutivas, hay señal real.
-
-El label M0 filtra: si el cliente es Promiscuo, la misma señal activa A2 (ventana de captura). Si es Leal, activa A3 (fuga preocupante).
-
-### M3 — Fuga en producto técnico (A4)
-
-**Algoritmo**: Isolation Forest por cliente individual, entrenado sobre su propio histórico. La ventaja es que no necesita un benchmark grupal: detecta anomalías respecto al patrón *propio* de cada cliente, lo que es crucial para productos técnicos con alta heterogeneidad.
-
-Input: `silence_streak`, `trend_slope_30d`, `pct_families_active` del cliente en esa familia. Si el modelo lo clasifica como anomalía y el cliente era comprador activo, se activa A4.
+**M5 — Señal previa a fuga** *(nuevo)*
+Combina múltiples señales débiles que individualmente no superan ningún umbral pero que en conjunto indican pre-fuga. Actúa entre dos y seis semanas antes que M2 o M3. Alimenta A9 (pre-fuga temprana). Funciona como score ponderado por reglas: cancelación reciente en cliente limpio (+2), primera devolución en menos de seis meses (+3), slope negativo en 30 días sin llegar al umbral de M2 (+1), silencio más largo de lo habitual (+1), reducción de familias activas (+2). El umbral de activación se calibra con el feedback loop para reducir falsos positivos progresivamente.
 
 ---
 
-## Motor de alertas y priorización (Capa 5)
+## Capa 5 — Motor de alertas y priorización
 
-Cada alerta lleva tres campos obligatorios según el briefing:
+Recibe las salidas de todos los modelos y genera alertas a nivel cliente × familia × momento. Cada alerta incluye obligatoriamente: motivo en lenguaje natural, familia afectada, canal recomendado, impacto económico esperado (`ratio_vs_potential × potencial_cliente × ticket_medio_familia`) y urgencia temporal (días hasta que la ventana se cierra o días de silencio acumulado). La priorización se calcula como `score = impacto_económico × (1 / días_restantes)`. El label de M0 determina el canal: delegado para clientes de alto valor o señales urgentes, televendedor para reposición y nuevos clientes, marketing automation para recuperación de inactivos.
 
-1. **Motivo** — explicación en lenguaje natural de qué variable activó la alerta (ej: "lleva 18 días sin pedir anestesia; su media histórica es 12 días")
-2. **Impacto económico esperado** — `ratio_vs_potential × potencial_cliente × ticket_medio_familia`
-3. **Urgencia** — días hasta que la ventana de captura se cierra (estimado por M1) o días de silencio acumulado
-
-La priorización final es: `score = impacto_económico × (1 / días_restantes)`, ordenado descendente. El delegado ve primero las alertas de mayor valor y mayor urgencia.
+El catálogo completo de alertas es: A1 reponer pronto, A2 ventana de captura en promiscuo, A3 fuga en leal (commodity), A4 fuga en técnico, A5 cliente recuperable, A6 anomalía de volumen brusca, A7 cliente nuevo sin segunda compra, A8 fricción oculta por devoluciones, A9 pre-fuga temprana multimodal.
 
 ---
 
-## Feedback loop (Capa 6)
+## Capa 6 — Activación y feedback loop
 
-Para que el sistema aprenda, cada alerta debe registrar:
-- Alerta generada (tipo, fecha, cliente, familia, score)
-- Acción tomada (quién, cuándo, canal)
-- Resultado a 30 días (pidió / no pidió, volumen recuperado)
+Distribuye las alertas priorizadas al canal correspondiente: delegado comercial, televendedor o plataforma de marketing automation (HubSpot o equivalente). La arquitectura es agnóstica de CRM: las alertas se exponen vía API o fichero estructurado, preparadas para integración futura.
 
-Con ese registro se pueden calcular la tasa de conversión por tipo de alerta, detectar falsos positivos sistemáticos (ej. clientes esporádicos que siempre se clasifican mal) y recalibrar los umbrales de los modelos periódicamente.
+Cada alerta registra tres momentos: generación (tipo, fecha, cliente, familia, score, modelo fuente), acción (quién actuó, cuándo, canal utilizado) y resultado a 30 días (pidió o no, volumen recuperado, devolución o no). Este registro alimenta el feedback loop: permite calcular la tasa de conversión por tipo de alerta, detectar falsos positivos sistemáticos por modelo, recalibrar umbrales periódicamente y, en el caso de M5, identificar qué combinaciones de señales débiles predicen mejor la fuga real.
