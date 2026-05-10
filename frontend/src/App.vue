@@ -8,8 +8,7 @@ const route = useRoute()
   <div class="app-shell">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <span class="brand-icon">⚡</span>
-        <span class="brand-name">Smart Demand</span>
+        <span class="brand-name">SigSer</span>
       </div>
       <nav class="sidebar-nav">
         <RouterLink to="/" class="nav-link" :class="{ active: route.path === '/' }">
