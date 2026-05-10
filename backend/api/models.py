@@ -107,15 +107,12 @@ class Alert(models.Model):
         DISMISSED = 'DISMISSED', 'Dismissed'
 
     class AlertType(models.TextChoices):
-        A1_REPLENISHMENT = 'A1', 'A1 — Replenishment window'
-        A2_CAPTURE = 'A2', 'A2 — Capture window'
-        A3_COMMODITY_CHURN = 'A3', 'A3 — Commodity churn detected'
-        A4_TECHNICAL_CHURN = 'A4', 'A4 — Technical product churn'
-        A5_ANOMALY = 'A5', 'A5 — Order anomaly'
-        A6_HIDDEN_FRICTION = 'A6', 'A6 — Hidden friction signal'
-        A7_EARLY_WARNING = 'A7', 'A7 — Early warning'
-        A8_RETURN_RISK = 'A8', 'A8 — Return / cancellation risk'
-        A9_PRE_CHURN = 'A9', 'A9 — Pre-churn signal'
+        A1_REPLENISHMENT = 'A1', 'A1 — Reposición pendiente'
+        A2_CAPTURE = 'A2', 'A2 — Ventana de captación'
+        A3_COMMODITY_CHURN = 'A3', 'A3 — Cliente fiel en riesgo'
+        A4_TECHNICAL_RISK = 'A4', 'A4 — Cliente técnico en riesgo'
+        A5_REACTIVATION = 'A5', 'A5 — Oportunidad de reactivación'
+        A6_SUDDEN_DROP = 'A6', 'A6 — Caída brusca de ventas'
 
     class RecommendedChannel(models.TextChoices):
         SALES_REP = 'SALES_REP', 'Sales representative'

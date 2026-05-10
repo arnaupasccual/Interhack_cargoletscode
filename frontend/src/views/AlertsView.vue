@@ -157,15 +157,12 @@ const totalPages = () => Math.ceil(count.value / PAGE_SIZE)
 
       <select v-model="filters.alert_type" class="form-control">
         <option value="">All types</option>
-        <option value="A2">A2 — Capture Window</option>
-        <option value="A3">A3 — Commodity Churn</option>
-        <option value="A4">A4 — Technical Churn</option>
-        <option value="A5">A5 — Recoverable</option>
-        <option value="A6">A6 — Abrupt Drop</option>
-        <option value="A1">A1 — Replenishment</option>
-        <option value="A7">A7 — No 2nd Purchase</option>
-        <option value="A8">A8 — Hidden Friction</option>
-        <option value="A9">A9 — Pre-Churn</option>
+        <option value="A1">A1 — Reposición Pendiente</option>
+        <option value="A2">A2 — Ventana de Captación</option>
+        <option value="A3">A3 — Cliente Fiel en Riesgo</option>
+        <option value="A4">A4 — Cliente Técnico en Riesgo</option>
+        <option value="A5">A5 — Oportunidad de Reactivación</option>
+        <option value="A6">A6 — Caída Brusca de Ventas</option>
       </select>
 
       <select v-model="filters.ordering" class="form-control">

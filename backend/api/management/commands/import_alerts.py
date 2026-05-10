@@ -39,24 +39,18 @@ ALERT_TYPE_MAP = {
     "A1": Alert.AlertType.A1_REPLENISHMENT,
     "A2": Alert.AlertType.A2_CAPTURE,
     "A3": Alert.AlertType.A3_COMMODITY_CHURN,
-    "A4": Alert.AlertType.A4_TECHNICAL_CHURN,
-    "A5": Alert.AlertType.A5_ANOMALY,
-    "A6": Alert.AlertType.A6_HIDDEN_FRICTION,
-    "A7": Alert.AlertType.A7_EARLY_WARNING,
-    "A8": Alert.AlertType.A8_RETURN_RISK,
-    "A9": Alert.AlertType.A9_PRE_CHURN,
+    "A4": Alert.AlertType.A4_TECHNICAL_RISK,
+    "A5": Alert.AlertType.A5_REACTIVATION,
+    "A6": Alert.AlertType.A6_SUDDEN_DROP,
 }
 
 PRIORITY_MAP = {
     "A6": Alert.Priority.CRITICAL,
     "A3": Alert.Priority.HIGH,
-    "A4": Alert.Priority.HIGH,
-    "A8": Alert.Priority.HIGH,
     "A2": Alert.Priority.MEDIUM,
-    "A9": Alert.Priority.MEDIUM,
+    "A4": Alert.Priority.MEDIUM,
     "A1": Alert.Priority.LOW,
     "A5": Alert.Priority.LOW,
-    "A7": Alert.Priority.LOW,
 }
 
 CHANNEL_MAP = {
@@ -73,21 +67,15 @@ MODEL_SOURCE_MAP = {
     "A4": Alert.ModelSource.M3_TECHNICAL_CHURN,
     "A5": Alert.ModelSource.M3_TECHNICAL_CHURN,
     "A6": Alert.ModelSource.M2_COMMODITY_CHURN,
-    "A7": Alert.ModelSource.M1_REPLENISHMENT,
-    "A8": Alert.ModelSource.M4_RETURN_RISK,
-    "A9": Alert.ModelSource.M5_PRE_CHURN,
 }
 
 ALERT_TITLES = {
-    "A1": "Reorder window open — stock likely running low",
-    "A2": "Capture window — client due for order, not placed yet",
-    "A3": "Sustained drop — loyal client buying below expected volume",
-    "A4": "Anomalous silence — client breaking own historical pattern",
-    "A5": "Re-engagement signal — inactive client shows buying intent",
-    "A6": "Abrupt volume collapse — no prior trend, act immediately",
-    "A7": "New client stalling — second order overdue",
-    "A8": "Return streak — hidden friction precedes churn",
-    "A9": "Multi-signal churn risk — early intervention window open",
+    "A1": "Ventana de reposición abierta — el stock está probablemente bajo",
+    "A2": "Ventana de captación — cliente con pedido pendiente",
+    "A3": "Caída sostenida — cliente fiel comprando por debajo de lo esperado",
+    "A4": "Cliente técnico en riesgo — rompiendo su propio patrón histórico",
+    "A5": "Oportunidad de reactivación — cliente inactivo muestra interés de compra",
+    "A6": "Caída brusca de ventas — sin tendencia previa, actuar de inmediato",
 }
 
 
@@ -234,11 +222,8 @@ class Command(BaseCommand):
             canal_raw = str(row.get("canal", "")).strip()
             channel = CHANNEL_MAP.get(canal_raw, Alert.RecommendedChannel.SALES_REP)
 
-            label_m0 = str(row.get("label_m0", "")).strip()
             title_base = ALERT_TITLES.get(tipo, tipo)
             title = f"{title_base} — {familia}" if familia else title_base
-            if label_m0 and label_m0 not in ("", "nan", "desconocido"):
-                title = f"[{label_m0}] {title}"
 
             lod_raw = row.get("last_order_date")
             last_order_date = lod_raw if pd.notna(lod_raw) and lod_raw else None

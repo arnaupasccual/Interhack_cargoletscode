@@ -34,9 +34,6 @@ CANAL_MAP = {
     "A4": "Delegado",
     "A5": "Marketing_Auto",
     "A6": "Delegado_Urgente",
-    "A7": "Televendedor",
-    "A8": "Delegado",
-    "A9": "Delegado",
 }
 
 URGENCIA_MAP = {
@@ -46,9 +43,6 @@ URGENCIA_MAP = {
     "A4": 1.5,
     "A5": 0.7,
     "A6": 2.0,
-    "A7": 0.9,
-    "A8": 1.3,
-    "A9": 1.4,
 }
 
 # ── Columnas obligatorias ─────────────────────────────────────────────────────

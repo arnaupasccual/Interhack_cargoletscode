@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
-// Alert entity — mirrors the backend Alert model and the alert catalog (A1–A9)
+// Alert entity — mirrors the backend Alert model and the alert catalog (A1–A6)
 // ---------------------------------------------------------------------------
 
-/** All nine alert types as defined in the alert catalog. */
+/** All six alert types as defined in the alert catalog. */
 export const ALERT_TYPES = {
   A1: {
     code: 'A1',
-    label: 'Reorder Due',
-    description: 'Client is approaching their usual reorder window for a commodity family. Call before stock runs out — waiting past the window risks losing the order to a competitor.',
+    label: 'Reposición Pendiente',
+    description: 'El cliente se acerca a su ventana habitual de reposición para una familia de productos. Llamar antes de que se agote el stock — esperar más allá de la ventana arriesga perder el pedido a la competencia.',
     modelSource: 'M1',
     defaultChannel: 'TELEMARKETER',
     defaultPriority: 'MEDIUM',
@@ -15,8 +15,8 @@ export const ALERT_TYPES = {
   },
   A2: {
     code: 'A2',
-    label: 'Capture Window',
-    description: 'Promiscuous client is in their expected buying window but has not ordered yet. Contact now to capture demand that typically goes to the competition — this window closes within days.',
+    label: 'Ventana de Captación',
+    description: 'El cliente está en su ventana de compra esperada pero aún no ha realizado el pedido. Contactar ahora para capturar la demanda que suele ir a la competencia — esta ventana se cierra en pocos días.',
     modelSource: 'M2',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'MEDIUM',
@@ -24,8 +24,8 @@ export const ALERT_TYPES = {
   },
   A3: {
     code: 'A3',
-    label: 'Loyal Client at Risk',
-    description: 'Loyal client shows a sustained, statistically significant drop in commodity consumption over 3+ consecutive weeks. Not a one-off variation — this is a pattern change requiring a diagnostic call or visit before the loss consolidates.',
+    label: 'Cliente Fiel en Riesgo',
+    description: 'El cliente fiel muestra una caída sostenida y estadísticamente significativa en el consumo de productos durante 3 o más semanas consecutivas. No es una variación puntual — es un cambio de patrón que requiere una llamada o visita diagnóstica antes de que la pérdida se consolide.',
     modelSource: 'M2',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'HIGH',
@@ -33,17 +33,17 @@ export const ALERT_TYPES = {
   },
   A4: {
     code: 'A4',
-    label: 'Technical Anomaly',
-    description: 'Client buying a technical product shows an anomalous pattern against their own historical baseline: excessive silence, accelerated volume drop, or abandonment of previously active families. Reference is the client\'s own past, not a group benchmark.',
+    label: 'Cliente Técnico en Riesgo',
+    description: 'El cliente que compra productos técnicos muestra un patrón anómalo respecto a su propio histórico: silencio excesivo, caída acelerada de volumen o abandono de familias anteriormente activas. La referencia es el propio pasado del cliente, no un grupo de comparación.',
     modelSource: 'M3',
     defaultChannel: 'SALES_REP',
-    defaultPriority: 'HIGH',
-    urgencyClass: 'high',
+    defaultPriority: 'MEDIUM',
+    urgencyClass: 'medium',
   },
   A5: {
     code: 'A5',
-    label: 'Re-engagement Signal',
-    description: 'Previously inactive client has placed a small order or shown a first contact after a long silence. This is the optimal window to re-engage — acting now has a significantly higher recovery rate than waiting.',
+    label: 'Oportunidad de Reactivación',
+    description: 'Un cliente previamente inactivo ha realizado un pequeño pedido o mostrado un primer contacto tras un largo silencio. Esta es la ventana óptima para reengancharlo — actuar ahora tiene una tasa de recuperación significativamente mayor que esperar.',
     modelSource: 'M3',
     defaultChannel: 'MARKETING_AUTO',
     defaultPriority: 'MEDIUM',
@@ -51,39 +51,12 @@ export const ALERT_TYPES = {
   },
   A6: {
     code: 'A6',
-    label: 'Volume Collapse',
-    description: 'Apparently stable client suffers a sharp, sudden volume collapse with no prior gradual trend. No early warning preceded this — immediate action required before the situation escalates to confirmed churn.',
+    label: 'Caída Brusca de Ventas',
+    description: 'Un cliente aparentemente estable sufre una caída brusca y repentina de volumen sin ninguna tendencia previa gradual. No hubo señales de alerta tempranas — se requiere acción inmediata antes de que la situación escale a pérdida confirmada.',
     modelSource: 'M2',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'CRITICAL',
     urgencyClass: 'critical',
-  },
-  A7: {
-    code: 'A7',
-    label: 'New Client Stalling',
-    description: 'New client has not placed a second order within the window the model estimated they should. Early non-conversion risk — a well-timed call now recovers most of these clients before the habit of buying elsewhere forms.',
-    modelSource: 'M1',
-    defaultChannel: 'TELEMARKETER',
-    defaultPriority: 'MEDIUM',
-    urgencyClass: 'medium',
-  },
-  A8: {
-    code: 'A8',
-    label: 'Return Pattern',
-    description: 'Growing return or cancellation pattern that has not yet impacted overall volume. Statistically, this is the earliest churn precursor in the system — act before volume drops and the client is already gone.',
-    modelSource: 'M4',
-    defaultChannel: 'SALES_REP',
-    defaultPriority: 'HIGH',
-    urgencyClass: 'high',
-  },
-  A9: {
-    code: 'A9',
-    label: 'Multi-Signal Risk',
-    description: 'No single signal crosses its individual threshold, but the weighted combination of multiple simultaneous weak signals indicates incipient churn. Estimated intervention window: 3–6 weeks before risk consolidates into confirmed loss.',
-    modelSource: 'M5',
-    defaultChannel: 'SALES_REP',
-    defaultPriority: 'HIGH',
-    urgencyClass: 'high',
   },
 }
 
@@ -130,7 +103,7 @@ export class Alert {
    */
   constructor(data) {
     this.id              = data.id
-    this.alertType       = data.alert_type          // 'A1' … 'A9'
+    this.alertType       = data.alert_type          // 'A1' … 'A6'
     this.priority        = data.priority            // CRITICAL / HIGH / MEDIUM / LOW
     this.status          = data.status              // OPEN / IN_PROGRESS / RESOLVED / DISMISSED
     this.modelSource     = data.model_source        // M0 … M5
