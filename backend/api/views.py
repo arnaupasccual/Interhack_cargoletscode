@@ -97,6 +97,18 @@ class AlertViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'reason', 'client__client_id', 'affected_family']
     ordering_fields = ['created_at', 'updated_at', 'priority', 'economic_impact', 'urgency_days']
 
+    def filter_queryset(self, queryset):
+        from django.db.models import F
+        queryset = super().filter_queryset(queryset)
+        ordering = self.request.query_params.get('ordering', '')
+        # SQLite (and Postgres) place NULLs first on ASC by default.
+        # Alerts without urgency_days (A2–A6) must always sort after those that have a value.
+        if ordering == 'urgency_days':
+            queryset = queryset.order_by(F('urgency_days').asc(nulls_last=True))
+        elif ordering == '-urgency_days':
+            queryset = queryset.order_by(F('urgency_days').desc(nulls_last=True))
+        return queryset
+
     def get_serializer_class(self):
         if self.action == 'list':
             return AlertListSerializer

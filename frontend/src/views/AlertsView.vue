@@ -10,17 +10,33 @@ const alerts  = ref([])
 const count   = ref(0)
 const loading = ref(true)
 const error   = ref(null)
-const page    = ref(1)
 const PAGE_SIZE = 50
 
+// ── Initialise from URL so state survives navigation ──────────────────────────
 const filters = reactive({
   status:     route.query.status     ?? '',
   priority:   route.query.priority   ?? '',
   alert_type: route.query.alert_type ?? '',
   search:     route.query.search     ?? '',
-  ordering:   '-created_at',
+  ordering:   route.query.ordering   ?? '-created_at',
 })
 
+const page = ref(parseInt(route.query.page ?? '1') || 1)
+const pageInput = ref(page.value)
+
+// ── URL sync ──────────────────────────────────────────────────────────────────
+function syncToUrl() {
+  const query = {}
+  if (filters.status)                          query.status     = filters.status
+  if (filters.priority)                        query.priority   = filters.priority
+  if (filters.alert_type)                      query.alert_type = filters.alert_type
+  if (filters.search)                          query.search     = filters.search
+  if (filters.ordering && filters.ordering !== '-created_at') query.ordering = filters.ordering
+  if (page.value > 1)                          query.page       = page.value
+  router.replace({ query })
+}
+
+// ── Data fetching ─────────────────────────────────────────────────────────────
 async function fetchAlerts() {
   loading.value = true
   error.value   = null
@@ -34,7 +50,7 @@ async function fetchAlerts() {
     const res = await alertsApi.list(params)
     alerts.value = res.results ?? res
     count.value  = res.count   ?? alerts.value.length
-  } catch (e) {
+  } catch {
     error.value = 'Could not load alerts. Is the backend running?'
   } finally {
     loading.value = false
@@ -43,38 +59,57 @@ async function fetchAlerts() {
 
 onMounted(fetchAlerts)
 
+// Filters reset page to 1 — debounced to avoid firing on every keystroke
 let debounceTimer = null
 watch(filters, () => {
-  page.value = 1
+  page.value      = 1
+  pageInput.value = 1
   clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(fetchAlerts, 250)
+  debounceTimer = setTimeout(() => {
+    syncToUrl()
+    fetchAlerts()
+  }, 250)
 }, { deep: true })
 
-watch(page, fetchAlerts)
+// Page changes (prev/next buttons or input) fetch immediately
+watch(page, (newVal, oldVal) => {
+  if (newVal === oldVal) return
+  pageInput.value = newVal
+  syncToUrl()
+  fetchAlerts()
+})
 
+// ── Page input helpers ────────────────────────────────────────────────────────
+function commitPageInput() {
+  const parsed = parseInt(pageInput.value)
+  const total  = totalPages()
+  if (!isNaN(parsed)) {
+    page.value = Math.min(Math.max(1, parsed), total || 1)
+  }
+  pageInput.value = page.value
+}
+
+function onPageKeydown(e) {
+  if (e.key === 'Enter') commitPageInput()
+}
+
+// ── Misc ──────────────────────────────────────────────────────────────────────
 function resetFilters() {
-  filters.status = ''
-  filters.priority = ''
+  filters.status     = ''
+  filters.priority   = ''
   filters.alert_type = ''
-  filters.search = ''
-  page.value = 1
+  filters.search     = ''
+  filters.ordering   = '-created_at'
+  page.value         = 1
 }
 
 function openAlert(id) {
   router.push(`/alerts/${id}`)
 }
 
-function priorityClass(p) {
-  return `badge-${p.toLowerCase()}`
-}
-
-function statusClass(s) {
-  return `badge-${s.toLowerCase()}`
-}
-
-function typeClass(t) {
-  return `badge-${t.toLowerCase()}`
-}
+function priorityClass(p) { return `badge-${p.toLowerCase()}` }
+function statusClass(s)   { return `badge-${s.toLowerCase()}` }
+function typeClass(t)     { return `badge-${t.toLowerCase()}` }
 
 function fmtImpact(v) {
   if (v == null) return '—'
@@ -159,6 +194,7 @@ const totalPages = () => Math.ceil(count.value / PAGE_SIZE)
             <th>Family</th>
             <th>Title</th>
             <th style="text-align:right">Impact</th>
+            <th style="text-align:right">Urgency (d)</th>
             <th>Date</th>
           </tr>
         </thead>
@@ -169,19 +205,14 @@ const totalPages = () => Math.ceil(count.value / PAGE_SIZE)
             class="alert-row"
             @click="openAlert(a.id)"
           >
-            <td>
-              <span :class="['badge', typeClass(a.alertType)]">{{ a.alertType }}</span>
-            </td>
-            <td>
-              <span :class="['badge', priorityClass(a.priority)]">{{ a.priority }}</span>
-            </td>
-            <td>
-              <span :class="['badge', statusClass(a.status)]">{{ a.status.replace('_', ' ') }}</span>
-            </td>
+            <td><span :class="['badge', typeClass(a.alertType)]">{{ a.alertType }}</span></td>
+            <td><span :class="['badge', priorityClass(a.priority)]">{{ a.priority }}</span></td>
+            <td><span :class="['badge', statusClass(a.status)]">{{ a.status.replace('_', ' ') }}</span></td>
             <td class="cell-mono">{{ a.clientExternalId ?? a.clientId }}</td>
             <td>{{ a.affectedFamily ?? '—' }}</td>
             <td class="cell-title">{{ a.title }}</td>
             <td class="cell-impact">{{ fmtImpact(a.economicImpact) }}</td>
+            <td class="cell-urgency">{{ a.urgencyDays != null ? a.urgencyDays : '—' }}</td>
             <td class="cell-date">{{ fmtDate(a.createdAt) }}</td>
           </tr>
         </tbody>
@@ -191,7 +222,22 @@ const totalPages = () => Math.ceil(count.value / PAGE_SIZE)
     <!-- Pagination -->
     <div v-if="totalPages() > 1" class="pagination">
       <button class="btn btn-secondary" :disabled="page <= 1" @click="page--">← Prev</button>
-      <span class="page-info">Page {{ page }} of {{ totalPages() }}</span>
+
+      <div class="page-control">
+        <span class="page-label">Page</span>
+        <input
+          class="page-input"
+          type="number"
+          :value="pageInput"
+          min="1"
+          :max="totalPages()"
+          @input="e => pageInput = e.target.value"
+          @change="commitPageInput"
+          @keydown="onPageKeydown"
+        />
+        <span class="page-label">of {{ totalPages() }}</span>
+      </div>
+
       <button class="btn btn-secondary" :disabled="page >= totalPages()" @click="page++">Next →</button>
     </div>
   </div>
@@ -241,10 +287,11 @@ const totalPages = () => Math.ceil(count.value / PAGE_SIZE)
 .alert-row:hover td { background: #f9fafb; }
 .alert-row:last-child td { border-bottom: none; }
 
-.cell-mono  { font-family: monospace; font-size: 12px; color: var(--text-secondary); }
-.cell-title { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.cell-impact { text-align: right; font-weight: 600; font-size: 13px; }
-.cell-date  { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.cell-mono    { font-family: monospace; font-size: 12px; color: var(--text-secondary); }
+.cell-title   { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.cell-impact  { text-align: right; font-weight: 600; font-size: 13px; }
+.cell-urgency { text-align: right; font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.cell-date    { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 
 .pagination {
   display: flex;
@@ -253,5 +300,30 @@ const totalPages = () => Math.ceil(count.value / PAGE_SIZE)
   justify-content: center;
   margin-top: 20px;
 }
-.page-info { font-size: 13px; color: var(--text-secondary); }
+
+.page-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.page-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.page-input {
+  width: 56px;
+  padding: 4px 6px;
+  font-size: 13px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  -moz-appearance: textfield;
+}
+.page-input::-webkit-inner-spin-button,
+.page-input::-webkit-outer-spin-button { opacity: 1; }
+.page-input:focus { outline: none; border-color: var(--accent); }
 </style>

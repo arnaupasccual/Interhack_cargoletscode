@@ -84,7 +84,7 @@ def classify_alert(row: pd.Series) -> dict:
         )
 
     # A2: ventana de captura en promiscuo
-    if label in ("promiscuo", "promiscuo_deterioro"):
+    if label == "promiscuo":
         silence_rel = silence / max(ioa, 1)
         if (VENTANA_CAPTURA_MIN <= silence_rel <= VENTANA_CAPTURA_MAX
                 and ratio < 0.65):
@@ -96,7 +96,7 @@ def classify_alert(row: pd.Series) -> dict:
             )
 
     # A3: fuga sostenida en leal
-    if label in ("leal", "leal_deterioro"):
+    if label == "leal":
         deterioro       = row["cusum_score"] < -CUSUM_THRESHOLD
         silencio_exc    = silence > ioa * SILENCIO_FUGA_MULTIPLIER
         tendencia_neg   = row["trend_slope_90d"] < -0.03

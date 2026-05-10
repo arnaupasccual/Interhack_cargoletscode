@@ -138,8 +138,8 @@ function statusBtnClass(s) {
             <span class="meta-value">{{ alert.modelLabel }}</span>
           </div>
           <div class="meta-item">
-            <span class="meta-label">Created</span>
-            <span class="meta-value">{{ fmtDate(alert.createdAt) }}</span>
+            <span class="meta-label">Last Order</span>
+            <span class="meta-value">{{ alert.lastOrderDate ?? '—' }}</span>
           </div>
         </div>
       </div>

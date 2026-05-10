@@ -86,6 +86,7 @@ class AlertListSerializer(serializers.ModelSerializer):
             'economic_impact',
             'urgency_days',
             'confidence_score',
+            'last_order_date',
             'created_at',
             'updated_at',
         ]
@@ -116,6 +117,7 @@ class AlertDetailSerializer(serializers.ModelSerializer):
             'economic_impact',
             'urgency_days',
             'confidence_score',
+            'last_order_date',
             'created_at', 'updated_at', 'resolved_at',
             'notes',
         ]

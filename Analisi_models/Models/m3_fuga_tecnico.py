@@ -158,11 +158,8 @@ def run(df: pd.DataFrame, label_m0: pd.DataFrame = None) -> pd.DataFrame:
 
     df_t["anomaly_type"] = df_t.apply(classify_anomaly_type, axis=1)
 
-    # A4: anómalo con historial real (no marginal)
-    df_t["activa_a4"] = (
-        df_t["_is_anomaly"] &
-        (df_t["label_m0"] != "marginal")
-    )
+    # A4: anómalo detectado por Isolation Forest
+    df_t["activa_a4"] = df_t["_is_anomaly"]
 
     # A5: reactivation_signal disponible directamente en el CSV
     if "reactivation_signal" in df_t.columns:

@@ -154,6 +154,11 @@ class Alert(models.Model):
     # Scores / confidence from the model (0–1)
     confidence_score = models.FloatField(null=True, blank=True)
 
+    last_order_date = models.DateField(
+        null=True, blank=True,
+        help_text='Date of the last order placed by the client for this family'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     resolved_at = models.DateTimeField(null=True, blank=True)

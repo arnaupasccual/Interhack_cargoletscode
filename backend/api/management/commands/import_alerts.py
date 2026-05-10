@@ -1,15 +1,23 @@
 """
 management/commands/import_alerts.py
 
-Runs the ML pipeline against a features CSV and imports the resulting
-alerts into the Django database.
+Two modes of operation:
 
-Usage:
-    python manage.py import_alerts --features-csv path/to/features_v2.csv
+  Mode A — run pipeline then import (end-to-end):
+    python manage.py import_alerts --features-csv path/to/features_v2.csv [--clear]
+
+  Mode B — import from a pre-filtered alerts CSV (pipeline already ran):
+    python manage.py import_alerts --alerts-csv path/to/alertas_filtered.csv [--clear]
+
+  Typical three-step workflow:
+    python ../Analisi_models/pipeline.py --input features_v2.csv --output alertas.csv
+    python ../Analisi_models/filter_alerts.py --input alertas.csv --output alertas_filtered.csv --tipo A1 A2
+    python manage.py import_alerts --alerts-csv ../Analisi_models/output/alertas_filtered.csv --clear
 
 Options:
-    --features-csv   Path to the pre-built features CSV (required)
-    --clear          Delete all existing open alerts before importing (default: False)
+    --features-csv   Path to the features CSV (triggers pipeline run)
+    --alerts-csv     Path to an alertas CSV already produced by pipeline.py / filter_alerts.py
+    --clear          Delete all existing OPEN alerts before importing (default: False)
     --dry-run        Print what would be imported without touching the DB
 """
 
@@ -71,15 +79,15 @@ MODEL_SOURCE_MAP = {
 }
 
 ALERT_TITLES = {
-    "A1": "Replenishment window",
-    "A2": "Capture window — promiscuous customer",
-    "A3": "Commodity churn — loyal customer",
-    "A4": "Technical product churn",
-    "A5": "Recoverable customer",
-    "A6": "Abrupt volume drop",
-    "A7": "New customer without second purchase",
-    "A8": "Hidden friction — returns / cancellations",
-    "A9": "Early pre-churn signal",
+    "A1": "Reorder window open — stock likely running low",
+    "A2": "Capture window — client due for order, not placed yet",
+    "A3": "Sustained drop — loyal client buying below expected volume",
+    "A4": "Anomalous silence — client breaking own historical pattern",
+    "A5": "Re-engagement signal — inactive client shows buying intent",
+    "A6": "Abrupt volume collapse — no prior trend, act immediately",
+    "A7": "New client stalling — second order overdue",
+    "A8": "Return streak — hidden friction precedes churn",
+    "A9": "Multi-signal churn risk — early intervention window open",
 }
 
 
@@ -87,10 +95,14 @@ class Command(BaseCommand):
     help = "Run the ML alert pipeline and import results into the database."
 
     def add_arguments(self, parser):
-        parser.add_argument(
+        source = parser.add_mutually_exclusive_group(required=True)
+        source.add_argument(
             "--features-csv",
-            required=True,
-            help="Path to the features CSV produced by feature_engineering_v2.py",
+            help="Path to the features CSV — runs the full ML pipeline before importing",
+        )
+        source.add_argument(
+            "--alerts-csv",
+            help="Path to an alertas CSV already produced by pipeline.py or filter_alerts.py",
         )
         parser.add_argument(
             "--clear",
@@ -106,12 +118,42 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # ── Mode B: import from pre-built alerts CSV ──────────────────────────
+        if options.get("alerts_csv"):
+            alerts_path = Path(options["alerts_csv"])
+            if not alerts_path.exists():
+                raise CommandError(f"Alerts CSV not found: {alerts_path}")
+            self.stdout.write(f"[1/2] Reading alerts from {alerts_path}...")
+            try:
+                df_alerts = pd.read_csv(alerts_path)
+            except Exception as exc:
+                raise CommandError(f"Could not read alerts CSV: {exc}")
+
+            if df_alerts.empty:
+                self.stdout.write(self.style.WARNING("Alerts CSV is empty. Nothing imported."))
+                return
+
+            self.stdout.write(f"[1/2] Loaded {len(df_alerts)} alerts.")
+
+            if options["dry_run"]:
+                self.stdout.write(self.style.SUCCESS("[DRY RUN] Would import:"))
+                for tipo, grp in df_alerts.groupby("tipo_alerta"):
+                    self.stdout.write(f"  {tipo}: {len(grp)} alerts")
+                return
+
+            self.stdout.write("[2/2] Importing into database...")
+            created, skipped = self._import_alerts(df_alerts, clear=options["clear"])
+            self.stdout.write(
+                self.style.SUCCESS(f"Done. Created: {created}  |  Skipped: {skipped}")
+            )
+            return
+
+        # ── Mode A: run pipeline then import ─────────────────────────────────
         features_path = Path(options["features_csv"])
         if not features_path.exists():
             raise CommandError(f"Features CSV not found: {features_path}")
 
-        # Locate the pipeline module relative to this file
-        repo_root = Path(__file__).resolve().parents[4]  # backend/api/management/commands → repo root
+        repo_root = Path(__file__).resolve().parents[4]
         analisi_path = repo_root / "Analisi_models"
         if not analisi_path.exists():
             raise CommandError(f"Could not find Analisi_models at {analisi_path}")
@@ -122,12 +164,11 @@ class Command(BaseCommand):
         except ImportError as exc:
             raise CommandError(f"Could not import pipeline: {exc}")
 
-        # Run pipeline to a temp file
         with tempfile.TemporaryDirectory() as tmpdir:
-            alerts_path = os.path.join(tmpdir, "alertas.csv")
+            tmp_alerts = os.path.join(tmpdir, "alertas.csv")
             self.stdout.write("[1/3] Running ML pipeline...")
             try:
-                df_alerts, _df_m0 = ml_pipeline.main(str(features_path), alerts_path)
+                df_alerts, _df_m0 = ml_pipeline.main(str(features_path), tmp_alerts)
             except Exception as exc:
                 raise CommandError(f"Pipeline failed: {exc}")
 
@@ -146,9 +187,7 @@ class Command(BaseCommand):
         self.stdout.write("[3/3] Importing into database...")
         created, skipped = self._import_alerts(df_alerts, clear=options["clear"])
         self.stdout.write(
-            self.style.SUCCESS(
-                f"Done. Created: {created}  |  Skipped (unknown client): {skipped}"
-            )
+            self.style.SUCCESS(f"Done. Created: {created}  |  Skipped: {skipped}")
         )
 
     @transaction.atomic
@@ -176,6 +215,12 @@ class Command(BaseCommand):
 
             client, _ = Client.objects.get_or_create(client_id=client_id_int)
 
+            # Populate province from pipeline data if not already set
+            provincia_raw = row.get("provincia")
+            if provincia_raw and pd.notna(provincia_raw) and not client.province:
+                client.province = str(provincia_raw).strip()
+                client.save(update_fields=["province"])
+
             familia = row.get("familia") or ""
             dias_restantes = row.get("dias_restantes")
             urgency = int(dias_restantes) if pd.notna(dias_restantes) else None
@@ -195,6 +240,9 @@ class Command(BaseCommand):
             if label_m0 and label_m0 not in ("", "nan", "desconocido"):
                 title = f"[{label_m0}] {title}"
 
+            lod_raw = row.get("last_order_date")
+            last_order_date = lod_raw if pd.notna(lod_raw) and lod_raw else None
+
             Alert.objects.create(
                 client=client,
                 alert_type=ALERT_TYPE_MAP[tipo],
@@ -208,6 +256,7 @@ class Command(BaseCommand):
                 economic_impact=economic_impact,
                 urgency_days=urgency,
                 confidence_score=confidence,
+                last_order_date=last_order_date,
             )
             created += 1
 

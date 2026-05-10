@@ -28,7 +28,7 @@ except Exception:
 
 # ── Configuración ─────────────────────────────────────────────────────────────
 
-VENTANA_ALERTA_DIAS = 4
+VENTANA_ALERTA_DIAS = 7
 PROB_UMBRAL_A1      = 0.60
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -146,9 +146,8 @@ def run(df: pd.DataFrame, label_m0: pd.DataFrame = None) -> pd.DataFrame:
     df_c["prob_pedido_7d"] = df_c.apply(prob_pedido_nd, axis=1)
 
     df_c["activa_a1"] = (
-        (df_c["label_m0"].isin(["leal", "promiscuo"])) &
-        (df_c["dias_restantes"] <= VENTANA_ALERTA_DIAS) &
-        (df_c["dias_restantes"] >= -5) &
+        (df_c["label_m0"].isin(["leal, promiscuo"])) |
+        (df_c["dias_restantes"] <= VENTANA_ALERTA_DIAS) |
         (df_c["prob_pedido_7d"] >= PROB_UMBRAL_A1)
     )
     df_c["motivo_a1"] = df_c.apply(

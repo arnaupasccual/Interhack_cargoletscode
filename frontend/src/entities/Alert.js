@@ -6,17 +6,17 @@
 export const ALERT_TYPES = {
   A1: {
     code: 'A1',
-    label: 'Replenish Soon',
-    description: 'A loyal customer is approaching their usual reorder window for a commodity family.',
+    label: 'Reorder Due',
+    description: 'Client is approaching their usual reorder window for a commodity family. Call before stock runs out — waiting past the window risks losing the order to a competitor.',
     modelSource: 'M1',
     defaultChannel: 'TELEMARKETER',
     defaultPriority: 'MEDIUM',
-    urgencyClass: 'low',       // low / medium / high / critical
+    urgencyClass: 'low',
   },
   A2: {
     code: 'A2',
     label: 'Capture Window',
-    description: 'A promiscuous customer is in their expected buying window but has not ordered — opportunity to capture demand from the competition.',
+    description: 'Promiscuous client is in their expected buying window but has not ordered yet. Contact now to capture demand that typically goes to the competition — this window closes within days.',
     modelSource: 'M2',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'MEDIUM',
@@ -24,8 +24,8 @@ export const ALERT_TYPES = {
   },
   A3: {
     code: 'A3',
-    label: 'Commodity Churn',
-    description: 'A loyal customer shows a sustained and statistically significant drop in commodity consumption over 3+ consecutive weeks.',
+    label: 'Loyal Client at Risk',
+    description: 'Loyal client shows a sustained, statistically significant drop in commodity consumption over 3+ consecutive weeks. Not a one-off variation — this is a pattern change requiring a diagnostic call or visit before the loss consolidates.',
     modelSource: 'M2',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'HIGH',
@@ -33,8 +33,8 @@ export const ALERT_TYPES = {
   },
   A4: {
     code: 'A4',
-    label: 'Technical Product Churn',
-    description: 'A customer buying a technical product shows an anomalous pattern relative to their own individual history (silence, volume drop, family abandonment).',
+    label: 'Technical Anomaly',
+    description: 'Client buying a technical product shows an anomalous pattern against their own historical baseline: excessive silence, accelerated volume drop, or abandonment of previously active families. Reference is the client\'s own past, not a group benchmark.',
     modelSource: 'M3',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'HIGH',
@@ -42,8 +42,8 @@ export const ALERT_TYPES = {
   },
   A5: {
     code: 'A5',
-    label: 'Recoverable Customer',
-    description: 'A previously inactive customer emits a weak reactivation signal — optimal moment to re-engage before they solidify as lost.',
+    label: 'Re-engagement Signal',
+    description: 'Previously inactive client has placed a small order or shown a first contact after a long silence. This is the optimal window to re-engage — acting now has a significantly higher recovery rate than waiting.',
     modelSource: 'M3',
     defaultChannel: 'MARKETING_AUTO',
     defaultPriority: 'MEDIUM',
@@ -51,8 +51,8 @@ export const ALERT_TYPES = {
   },
   A6: {
     code: 'A6',
-    label: 'Abrupt Volume Anomaly',
-    description: 'An apparently stable customer suffers a sharp, sudden volume drop with no prior gradual trend to explain it.',
+    label: 'Volume Collapse',
+    description: 'Apparently stable client suffers a sharp, sudden volume collapse with no prior gradual trend. No early warning preceded this — immediate action required before the situation escalates to confirmed churn.',
     modelSource: 'M2',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'CRITICAL',
@@ -60,8 +60,8 @@ export const ALERT_TYPES = {
   },
   A7: {
     code: 'A7',
-    label: 'New Customer — No Second Purchase',
-    description: 'A new customer has not reordered within the window M1 estimated they should have — early non-conversion risk.',
+    label: 'New Client Stalling',
+    description: 'New client has not placed a second order within the window the model estimated they should. Early non-conversion risk — a well-timed call now recovers most of these clients before the habit of buying elsewhere forms.',
     modelSource: 'M1',
     defaultChannel: 'TELEMARKETER',
     defaultPriority: 'MEDIUM',
@@ -69,8 +69,8 @@ export const ALERT_TYPES = {
   },
   A8: {
     code: 'A8',
-    label: 'Hidden Friction (Returns)',
-    description: 'A customer shows a growing return/cancellation pattern that has not yet hit volume — statistically precedes churn and is the earliest signal in the system.',
+    label: 'Return Pattern',
+    description: 'Growing return or cancellation pattern that has not yet impacted overall volume. Statistically, this is the earliest churn precursor in the system — act before volume drops and the client is already gone.',
     modelSource: 'M4',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'HIGH',
@@ -78,8 +78,8 @@ export const ALERT_TYPES = {
   },
   A9: {
     code: 'A9',
-    label: 'Pre-Churn Signal',
-    description: 'No single signal crosses its threshold, but the weighted combination of multiple simultaneous weak signals indicates an incipient churn process.',
+    label: 'Multi-Signal Risk',
+    description: 'No single signal crosses its individual threshold, but the weighted combination of multiple simultaneous weak signals indicates incipient churn. Estimated intervention window: 3–6 weeks before risk consolidates into confirmed loss.',
     modelSource: 'M5',
     defaultChannel: 'SALES_REP',
     defaultPriority: 'HIGH',
@@ -144,7 +144,7 @@ export class Alert {
     this.clientId        = data.client                           // FK integer
     this.client          = data.client_info ?? null              // Nested object (detail only)
     this.clientExternalId = data.client_external_id ?? null      // The supplier's own client_id
-    this.clientProvince  = data.client_province ?? null
+    this.clientProvince  = data.client_province ?? data.client_info?.province ?? null
 
     // Actionability
     this.recommendedChannel = data.recommended_channel ?? null
@@ -153,6 +153,7 @@ export class Alert {
     this.confidenceScore = data.confidence_score ?? null         // 0–1 float
 
     // Timestamps
+    this.lastOrderDate   = data.last_order_date ?? null          // Date of the triggering order (YYYY-MM-DD)
     this.createdAt       = data.created_at  ? new Date(data.created_at)  : null
     this.updatedAt       = data.updated_at  ? new Date(data.updated_at)  : null
     this.resolvedAt      = data.resolved_at ? new Date(data.resolved_at) : null

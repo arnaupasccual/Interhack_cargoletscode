@@ -124,7 +124,8 @@ def load_features(path: str) -> pd.DataFrame:
 
 def build_alert_row(client_id, familia, tipo_alerta, motivo,
                     fam_potential, ratio_vs_potential,
-                    dias_restantes=None, label_m0=None, extra=None) -> dict:
+                    dias_restantes=None, label_m0=None,
+                    provincia=None, last_order_date=None, extra=None) -> dict:
     impacto = round(fam_potential * ratio_vs_potential * 0.25, 2)
     urgencia_factor = URGENCIA_MAP.get(tipo_alerta, 1.0)
     urgencia_temporal = 1.0 / max(dias_restantes, 1) if dias_restantes and dias_restantes > 0 else 1.5
@@ -142,6 +143,8 @@ def build_alert_row(client_id, familia, tipo_alerta, motivo,
         "score_prioridad":  score,
         "dias_restantes":   dias_restantes,
         "estado":           "pendiente",
+        "provincia":        provincia,
+        "last_order_date":  last_order_date,
     }
     if extra:
         row.update(extra)
@@ -159,9 +162,31 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
     pot_lkp    = base.set_index(["Id. Cliente", "Familia_H"])["fam_potential"].to_dict()
     ratio_lkp  = base.set_index(["Id. Cliente", "Familia_H"])["ratio_vs_potential"].to_dict()
 
+    # Province lookup
+    prov_lkp = {}
+    if "Provincia" in df.columns:
+        tmp = df[["Id. Cliente", "Familia_H", "Provincia"]].drop_duplicates(
+            subset=["Id. Cliente", "Familia_H"])
+        prov_lkp = dict(zip(zip(tmp["Id. Cliente"], tmp["Familia_H"]), tmp["Provincia"]))
+
+    # Last order date lookup: ref_date - days_since_last_order
+    lod_lkp = {}
+    if "ref_date" in df.columns and "days_since_last_order" in df.columns:
+        tmp = df[["Id. Cliente", "Familia_H", "ref_date", "days_since_last_order"]].copy()
+        tmp["ref_date"] = pd.to_datetime(tmp["ref_date"], errors="coerce")
+        tmp["_lod"] = tmp["ref_date"] - pd.to_timedelta(tmp["days_since_last_order"], unit="D")
+        tmp = tmp.drop_duplicates(subset=["Id. Cliente", "Familia_H"])
+        lod_lkp = {
+            (r["Id. Cliente"], r["Familia_H"]): r["_lod"].date().isoformat()
+            for _, r in tmp.iterrows()
+            if pd.notna(r["_lod"])
+        }
+
     def glabel(cid, fam):  return label_lkp.get((cid, fam), "desconocido")
     def gpot(cid, fam):    return pot_lkp.get((cid, fam), 1000.0)
     def gratio(cid, fam):  return ratio_lkp.get((cid, fam), 0.5)
+    def gprov(cid, fam):   return prov_lkp.get((cid, fam))
+    def glod(cid, fam):    return lod_lkp.get((cid, fam))
 
     # A1
     for _, r in out_m1[out_m1["activa_a1"]].iterrows():
@@ -171,6 +196,7 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
             gpot(cid, fam), gratio(cid, fam),
             dias_restantes=r["dias_restantes"],
             label_m0=glabel(cid, fam),
+            provincia=gprov(cid, fam), last_order_date=glod(cid, fam),
             extra={"prob_pedido_7d": r["prob_pedido_7d"]},
         ))
 
@@ -181,6 +207,7 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
             cid, fam, "A2", r["motivo_a2"],
             gpot(cid, fam), gratio(cid, fam),
             label_m0=glabel(cid, fam),
+            provincia=gprov(cid, fam), last_order_date=glod(cid, fam),
             extra={"cusum_score": r["cusum_score"]},
         ))
 
@@ -191,6 +218,7 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
             cid, fam, "A3", r["motivo_a3"],
             gpot(cid, fam), gratio(cid, fam),
             label_m0=glabel(cid, fam),
+            provincia=gprov(cid, fam), last_order_date=glod(cid, fam),
             extra={"cusum_score": r["cusum_score"]},
         ))
 
@@ -201,6 +229,7 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
             cid, fam, "A4", r["motivo_a4"],
             gpot(cid, fam), gratio(cid, fam),
             label_m0=glabel(cid, fam),
+            provincia=gprov(cid, fam), last_order_date=glod(cid, fam),
             extra={"anomaly_score": r["anomaly_score"],
                    "anomaly_type":  r["anomaly_type"]},
         ))
@@ -212,6 +241,7 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
             cid, fam, "A5", r["motivo_a5"],
             gpot(cid, fam), gratio(cid, fam),
             label_m0=glabel(cid, fam),
+            provincia=gprov(cid, fam), last_order_date=glod(cid, fam),
         ))
 
     # A6
@@ -221,6 +251,7 @@ def collect_alerts(df, out_m0, out_m1, out_m2, out_m3) -> pd.DataFrame:
             cid, fam, "A6", r["motivo_a6"],
             gpot(cid, fam), gratio(cid, fam),
             label_m0=glabel(cid, fam),
+            provincia=gprov(cid, fam), last_order_date=glod(cid, fam),
             extra={"zscore_30d": r["zscore_30d"]},
         ))
 
